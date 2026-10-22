@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>会議の貢献度評価</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #fff; --ink: #1d1d1f; --sub: #6b6b70; --line: #e2e2e0;
+    --accent: #2f5bd3; --accent-ink: #fff; --ok: #1f8a4c; --warn: #b54708;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px 16px 40px; }
+  h1 { font-size: 1.3rem; margin: 8px 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .muted { color: var(--sub); font-size: .9rem; }
+  button { font: inherit; border: 0; border-radius: 10px; cursor: pointer; touch-action: manipulation; }
+  .primary { display: block; width: 100%; padding: 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 1.05rem; }
+  .primary:disabled { background: #b9c3dc; cursor: default; }
+  .progress { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: var(--sub); font-size: .9rem; }
+  .context { background: #eef2fb; border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 6px; font-size: .95rem; margin-bottom: 8px; }
+  .stage { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 704 / 576; }
+  .stage video { width: 100%; height: 100%; display: block; }
+  .blind { position: absolute; inset: 0; background: #000; display: none; align-items: center; justify-content: center; color: #9a9a9a; font-size: .95rem; }
+  .stage.audio-only .blind { display: flex; }
+  .playbtn { position: absolute; inset: 0; margin: auto; width: 84px; height: 84px; border-radius: 50%; background: rgba(255,255,255,.92); color: #111; font-size: 2rem; }
+  .subs { min-height: 5.4em; background: #111; color: #fff; padding: 8px 12px; border-radius: 0 0 8px 8px; font-size: .95rem; line-height: 1.5; }
+  .subs p { margin: 0; }
+  .subs b { color: #ffd166; margin-right: .3em; }
+  .replay { margin-top: 8px; background: none; color: var(--accent); padding: 6px 0; }
+  .alloc-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .remain { font-weight: 700; }
+  .remain.zero { color: var(--ok); }
+  .remain.over { color: var(--warn); }
+  .row { display: grid; grid-template-columns: 2.2em 1fr 3.2em 1fr; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .who { font-weight: 700; font-size: 1.2rem; text-align: center; }
+  .row button { padding: 10px 0; background: #eceef3; font-size: 1.1rem; font-weight: 600; }
+  .row button:disabled { color: #c2c2c6; }
+  .val { text-align: center; font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .locked { opacity: .45; pointer-events: none; }
+  ol { padding-left: 1.3em; margin: 8px 0; }
+  label.consent { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; }
+  label.consent input { width: 22px; height: 22px; margin-top: 2px; }
+  fieldset.pq { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
+  fieldset.pq legend { font-weight: 600; padding: 0 4px; }
+  fieldset.pq label { display: block; padding: 6px 0; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+// ===== 設定 =====
+// Google Apps Script のウェブアプリURL(apps_script.gs をデプロイして貼る)。空ならこの端末の中にだけ保存する
+const ENDPOINT = "";
+const STEP = 5;           // 配分の刻み
+const TOTAL = 100;
+// 4本のうちどの2本を「映像あり」にするか(6通り)。参加者ごとに順番に割り当てる
+const COMBOS = [[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]];
+// URLパラメータ
+//   ?src=booth … ブースの端末 / ?src=qr … QRコードから自分のスマホ(分析で分けて扱う)
+//   ?pilot=1   … 予備実験版(各場面のあとに「見えたか」「判断できたか」を聞く。割り当ての通し番号は消費しない)
+const params = new URLSearchParams(location.search);
+const SRC = params.get("src") || "unknown";
+const PILOT = params.get("pilot") === "1";
+
+const app = document.getElementById("app");
+const state = { pid: crypto.randomUUID(), startedAt: new Date().toISOString(), trials: [], mode: PILOT ? "pilot" : "main", src: SRC };
+
+const h = (html) => { app.innerHTML = html; window.scrollTo(0, 0); };
+const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) ?? def; } catch (e) { return def; } }
+
+async function assignCombo() {
+  // サーバーの通し番号 n で割り当てる: 映像ありの2本 = COMBOS[n % 6]、条件の順番 = floor(n / 6) % 2
+  // (0: 映像あり2本→映像なし2本、1: 映像なし2本→映像あり2本)。12人で一巡する
+  // 予備実験版とサーバーにつながらないときはランダム
+  if (ENDPOINT && !PILOT) {
+    try {
+      const r = await fetch(ENDPOINT + "?action=assign", { cache: "no-store" });
+      const j = await r.json();
+      if (Number.isInteger(j.n)) return { index: j.n % COMBOS.length, videoFirst: Math.floor(j.n / COMBOS.length) % 2 === 0, source: "server" };
+    } catch (e) {}
+  }
+  return { index: Math.floor(Math.random() * COMBOS.length), videoFirst: Math.random() < 0.5, source: "random" };
+}
+
+async function init() {
+  const cfg = await (await fetch("clips.json")).json();
+  const clips = cfg.clips.filter(c => !c.practice);
+  for (const c of clips) c.cues = await (await fetch(c.subs)).json();
+  state.cfg = cfg;
+  state.clips = clips;
+  intro();
+}
+
+function intro() {
+  h(`
+    <h1>会議の貢献度評価</h1>
+    <div class="card">
+      <p>${state.cfg.common}</p>
+      <ol>
+        <li>短い会議の場面（各60秒）を <b>4本</b> 見てください。</li>
+        <li>それぞれの場面のあとで、<b>4人（A〜D）の会議への貢献度</b>に応じて、合計100点を振り分けてください。</li>
+      </ol>
+      <p class="muted">所要時間は約6分です。音声が出ますので、イヤホンの使用をおすすめします。英語の会議ですが、日本語字幕が付きます。場面によっては映像がなく、音声と字幕だけのものがあります。</p>
+      <p class="muted">回答は匿名で、研究目的にのみ使用します。途中でやめることもできます。</p>
+      <label class="consent"><input type="checkbox" id="ok"> <span>上記を理解し、研究への参加に同意します。</span></label>
+      <button class="primary" id="start" disabled>はじめる</button>
+    </div>
+    <p class="muted">映像：AMI Meeting Corpus（CC BY 4.0）</p>
+  `);
+  const ok = document.getElementById("ok"), start = document.getElementById("start");
+  ok.onchange = () => start.disabled = !ok.checked;
+  start.onclick = async () => {
+    start.disabled = true;
+    const a = await assignCombo();
+    // 条件ごとにまとめて提示する。各まとまりの中の2本の順番はランダム
+    const vid = COMBOS[a.index], aud = [0, 1, 2, 3].filter(i => !vid.includes(i));
+    const order = a.videoFirst ? shuffle(vid).concat(shuffle(aud)) : shuffle(aud).concat(shuffle(vid));
+    state.combo = a.index; state.videoFirst = a.videoFirst; state.assignSource = a.source;
+    state.plan = order.map(i => ({ clip: state.clips[i], video: vid.includes(i) }));
+    trial(0);
+  };
+}
+
+function trial(k) {
+  const { clip, video } = state.plan[k];
+  const t = { clip: clip.id, condition: video ? "video" : "audio", position: k + 1, plays: 0, completed: false,
+              shownAt: Date.now(), alloc: { A: 0, B: 0, C: 0, D: 0 } };
+  h(`
+    <div class="progress"><span>場面 ${k + 1} / ${state.plan.length}</span><span>${video ? "映像＋音声" : "音声のみ"}</span></div>
+    <div class="context">会議の話題：${clip.context}</div>
+    <div class="stage ${video ? "" : "audio-only"}">
+      <video id="v" src="${clip.video}" playsinline webkit-playsinline preload="auto"></video>
+      <div class="blind">この場面は音声と字幕のみです</div>
+      <button class="playbtn" id="play" aria-label="再生">▶</button>
+    </div>
+    <div class="subs" id="subs"></div>
+    <button class="replay" id="replay" hidden>↻ もう一度再生する</button>
+    <div class="card locked" id="alloc" style="margin-top:12px">
+      <div class="alloc-head"><b>4人の貢献度に、合計100点を振り分けてください</b></div>
+      <p class="muted" id="hint" style="margin:0 0 6px">再生が終わると入力できます。</p>
+      ${"ABCD".split("").map(p => `
+        <div class="row" data-p="${p}">
+          <div class="who">${p}</div>
+          <button data-d="-1" aria-label="${p}を減らす">−${STEP}</button>
+          <div class="val" id="val${p}">0</div>
+          <button data-d="1" aria-label="${p}を増やす">＋${STEP}</button>
+        </div>`).join("")}
+      <p style="text-align:right;margin:8px 0 12px">残り <span class="remain" id="remain">${TOTAL}</span> 点</p>
+      ${PILOT ? pilotQuestions(video) : ""}
+      <button class="primary" id="next" disabled>${k + 1 < state.plan.length ? "次の場面へ" : "回答を送信する"}</button>
+    </div>
+  `);
+
+  const v = document.getElementById("v"), subs = document.getElementById("subs");
+  const play = document.getElementById("play"), replay = document.getElementById("replay");
+  const alloc = document.getElementById("alloc"), next = document.getElementById("next");
+  let raf = 0, lastHtml = "";
+
+  const drawSubs = () => {
+    const now = v.currentTime;
+    const html = clip.cues.filter(c => c.start <= now && now < c.end)
+      .map(c => `<p><b>${c.speaker}</b>${c.ja}</p>`).join("");
+    if (html !== lastHtml) { subs.innerHTML = html; lastHtml = html; }
+    if (!v.paused) raf = requestAnimationFrame(drawSubs);
+  };
+  const start = () => {
+    v.currentTime = 0;
+    v.play().then(() => { t.plays++; play.hidden = true; replay.hidden = true; raf = requestAnimationFrame(drawSubs); })
+      .catch(() => { play.hidden = false; });
+  };
+  play.onclick = start;
+  replay.onclick = start;
+  // 途中で一時停止させない(タップで止まらないように何もしない)。終了後に入力を開放する
+  v.onended = () => {
+    cancelAnimationFrame(raf); subs.innerHTML = ""; lastHtml = "";
+    t.completed = true; replay.hidden = false;
+    if (alloc.classList.contains("locked")) { alloc.classList.remove("locked"); document.getElementById("hint").hidden = true; t.unlockedAt = Date.now(); alloc.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  };
+
+  const render = () => {
+    const sum = Object.values(t.alloc).reduce((a, b) => a + b, 0), rest = TOTAL - sum;
+    for (const p of "ABCD") {
+      document.getElementById("val" + p).textContent = t.alloc[p];
+      const row = alloc.querySelector(`[data-p="${p}"]`);
+      row.querySelector('[data-d="-1"]').disabled = t.alloc[p] <= 0;
+      row.querySelector('[data-d="1"]').disabled = rest <= 0;
+    }
+    const r = document.getElementById("remain");
+    r.textContent = rest; r.className = "remain" + (rest === 0 ? " zero" : "");
+    next.disabled = rest !== 0 || (PILOT && !pilotAnswered(alloc, video));
+  };
+  if (PILOT) alloc.addEventListener("change", render);
+  alloc.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-d]"); if (!b) return;
+    const p = b.closest(".row").dataset.p;
+    t.alloc[p] = Math.max(0, Math.min(TOTAL, t.alloc[p] + STEP * Number(b.dataset.d)));
+    t.edits = (t.edits || 0) + 1;
+    render();
+  });
+  next.onclick = () => {
+    v.pause();
+    t.answeredAt = Date.now();
+    t.ratingMs = t.answeredAt - (t.unlockedAt || t.answeredAt);
+    if (PILOT) {
+      t.pilotSeen = (alloc.querySelector('input[name="seen"]:checked') || {}).value || "";
+      t.pilotJudge = (alloc.querySelector('input[name="judge"]:checked') || {}).value || "";
+    }
+    state.trials.push(t);
+    k + 1 < state.plan.length ? trial(k + 1) : finish();
+  };
+  render();
+}
+
+// 予備実験版で各場面のあとに聞く質問
+function radios(name, q, opts) {
+  return `<fieldset class="pq"><legend>${q}</legend>${opts.map(o => `<label><input type="radio" name="${name}" value="${o}"> ${o}</label>`).join("")}</fieldset>`;
+}
+function pilotQuestions(video) {
+  return (video ? radios("seen", "4人のうなずきや表情などの動きは見えましたか？", ["はっきり見えた", "なんとか見えた", "ほとんど見えなかった"]) : "")
+    + radios("judge", "60秒で4人の貢献度を判断できましたか？", ["判断できた", "なんとなく判断できた", "判断できなかった"]);
+}
+function pilotAnswered(root, video) {
+  return (!video || root.querySelector('input[name="seen"]:checked')) && root.querySelector('input[name="judge"]:checked');
+}
+
+async function finish() {
+  h(`<div class="card"><p>送信しています…</p></div>`);
+  const rows = state.trials.map(t => ({
+    mode: state.mode, src: state.src, pid: state.pid, startedAt: state.startedAt,
+    combo: state.combo, videoFirst: state.videoFirst, assignSource: state.assignSource,
+    position: t.position, clip: t.clip, condition: t.condition,
+    A: t.alloc.A, B: t.alloc.B, C: t.alloc.C, D: t.alloc.D,
+    plays: t.plays, completed: t.completed, edits: t.edits || 0, ratingMs: t.ratingMs,
+    screenW: window.screen.width, screenH: window.screen.height, ua: navigator.userAgent,
+    pilotSeen: t.pilotSeen || "", pilotJudge: t.pilotJudge || "",
+  }));
+  // 送信に失敗しても失わないよう、先に端末内にも保存する
+  const saved = load("responses", []); saved.push(...rows); store("responses", saved);
+  let sent = false;
+  if (ENDPOINT) {
+    try {
+      // text/plain で送ると Apps Script へのプリフライトが発生しない
+      await fetch(ENDPOINT, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(rows) });
+      sent = true;
+    } catch (e) {}
+  }
+  h(`
+    <div class="card">
+      <h1>ご協力ありがとうございました</h1>
+      <p>回答は${sent ? "送信されました" : "この端末に保存されました"}。このページは閉じて大丈夫です。</p>
+    </div>
+  `);
+}
+
+// 端末内に保存された回答をCSVで書き出す(URLの末尾に #export を付けて開く)
+function exportCsv() {
+  const rows = load("responses", []);
+  if (!rows.length) { h(`<div class="card">保存された回答はありません。</div>`); return; }
+  const keys = Object.keys(rows[0]);
+  const csv = [keys.join(",")].concat(rows.map(r => keys.map(k => JSON.stringify(r[k] ?? "")).join(","))).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
+  a.download = `responses_${new Date().toISOString().slice(0, 10)}.csv`;
+  h(`<div class="card"><p>${rows.length}行の回答があります。</p></div>`);
+  app.firstElementChild.appendChild(Object.assign(a, { textContent: "CSVをダウンロード", className: "primary", style: "text-align:center;text-decoration:none" }));
+}
+
+location.hash === "#export" ? exportCsv() : init().catch(e => h(`<div class="card">読み込みに失敗しました：${e.message}</div>`));
+</script>
+</body>
+</html>

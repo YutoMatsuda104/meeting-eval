@@ -1,0 +1,135 @@
+[
+ {
+  "speaker": "B",
+  "start": 0.11,
+  "end": 1.57,
+  "en": "fancy things.",
+  "ja": "凝ったもの。"
+ },
+ {
+  "speaker": "C",
+  "start": 1.27,
+  "end": 7.71,
+  "en": "It seems also like with the speech recognition, yeah, it's a great feature, but if you're watching TV, there's a lot of ambient",
+  "ja": "音声認識についても、確かにすごい機能だけど、TVを見てるときは周りの"
+ },
+ {
+  "speaker": "C",
+  "start": 7.71,
+  "end": 8.99,
+  "en": "sound, and it's words.",
+  "ja": "音が多くて、しかもそれが言葉なんだよね。"
+ },
+ {
+  "speaker": "C",
+  "start": 8.99,
+  "end": 11.66,
+  "en": "It's not just, you know, noises like something hitting.",
+  "ja": "何かがぶつかる音みたいな、ただの雑音じゃない。"
+ },
+ {
+  "speaker": "C",
+  "start": 12.24,
+  "end": 18.63,
+  "en": "It's actual speech, so then you have to make sure that the speech recognizer is good enough to filter out",
+  "ja": "本物の話し声だから、音声認識がちゃんと"
+ },
+ {
+  "speaker": "C",
+  "start": 18.63,
+  "end": 21.53,
+  "en": "the TV speech, and the the user's speech.",
+  "ja": "TVの声とユーザーの声を区別できるようにしないといけない。"
+ },
+ {
+  "speaker": "C",
+  "start": 21.53,
+  "end": 23.13,
+  "en": "Otherwise, you can say remote.",
+  "ja": "じゃないと、「リモコン」って言っても…"
+ },
+ {
+  "speaker": "B",
+  "start": 22.93,
+  "end": 24.54,
+  "en": "Off.",
+  "ja": "「オフ」。"
+ },
+ {
+  "speaker": "C",
+  "start": 23.13,
+  "end": 29.26,
+  "en": "But if someone on the screen is saying the same thing, all of a sudden, you have someone in a movie saying off and your screen",
+  "ja": "画面の中の誰かが同じことを言ったら、急に映画の登場人物が「オフ」って言って、画面が"
+ },
+ {
+  "speaker": "C",
+  "start": 29.26,
+  "end": 34.48,
+  "en": "dies, because they've triggered the remote control and it's turned off your TV.",
+  "ja": "消えちゃう。リモコンが反応して、TVを切っちゃうから。"
+ },
+ {
+  "speaker": "C",
+  "start": 35.38,
+  "end": 41.41,
+  "en": "So, I think if we can find a speech recognizer that can handle those types of problems, then yeah, it'd be a really",
+  "ja": "だから、そういう問題に対応できる音声認識が見つかれば、確かにすごく"
+ },
+ {
+  "speaker": "C",
+  "start": 41.41,
+  "end": 42.55,
+  "en": "good marketing gimmick.",
+  "ja": "いい売り文句になると思う。"
+ },
+ {
+  "speaker": "D",
+  "start": 41.43,
+  "end": 42.43,
+  "en": "Mm.",
+  "ja": "うん。"
+ },
+ {
+  "speaker": "C",
+  "start": 42.55,
+  "end": 46.73,
+  "en": "But, I think we seriously need to consider how that would impact",
+  "ja": "でも、それが状況にどう影響するかは"
+ },
+ {
+  "speaker": "C",
+  "start": 48.63,
+  "end": 49.63,
+  "en": "the situation.",
+  "ja": "真剣に考える必要があると思う。"
+ },
+ {
+  "speaker": "B",
+  "start": 49.6,
+  "end": 50.6,
+  "en": "Very good point.",
+  "ja": "すごくいい指摘だね。"
+ },
+ {
+  "speaker": "D",
+  "start": 51.17,
+  "end": 57.21,
+  "en": "Because tha w with speech recognition uh th I'm not that good at that idea",
+  "ja": "というのも、音声認識は…あまりいい案だとは思わないんだけど、"
+ },
+ {
+  "speaker": "D",
+  "start": 57.21,
+  "end": 60,
+  "en": "but th if it's a one-word",
+  "ja": "でも、一単語だけなら…"
+ },
+ {
+  "speaker": "C",
+  "start": 57.62,
+  "end": 58.62,
+  "en": "Mm-hmm.",
+  "ja": "うんうん。"
+ }
+]
