@@ -45,9 +45,6 @@
   ol { padding-left: 1.3em; margin: 8px 0; }
   label.consent { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; }
   label.consent input { width: 22px; height: 22px; margin-top: 2px; }
-  fieldset.pq { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
-  fieldset.pq legend { font-weight: 600; padding: 0 4px; }
-  fieldset.pq label { display: block; padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -60,15 +57,12 @@ const STEP = 5;           // 配分の刻み
 const TOTAL = 100;
 // 4本のうちどの2本を「映像あり」にするか(6通り)。参加者ごとに順番に割り当てる
 const COMBOS = [[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]];
-// URLパラメータ
-//   ?src=booth … ブースの端末 / ?src=qr … QRコードから自分のスマホ(分析で分けて扱う)
-//   ?pilot=1   … 予備実験版(各場面のあとに「見えたか」「判断できたか」を聞く。割り当ての通し番号は消費しない)
-const params = new URLSearchParams(location.search);
-const SRC = params.get("src") || "unknown";
-const PILOT = params.get("pilot") === "1";
+// 配布したリンクの種類: 研究室・ゼミのメンバーには ?src=lab 付きのリンクを配る(仮説を知っている可能性があるので分析で分ける)
+// それ以外の人にはパラメータなしのリンク(src = "general")
+const SRC = new URLSearchParams(location.search).get("src") || "general";
 
 const app = document.getElementById("app");
-const state = { pid: crypto.randomUUID(), startedAt: new Date().toISOString(), trials: [], mode: PILOT ? "pilot" : "main", src: SRC };
+const state = { pid: crypto.randomUUID(), startedAt: new Date().toISOString(), trials: [], src: SRC };
 
 const h = (html) => { app.innerHTML = html; window.scrollTo(0, 0); };
 const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -79,8 +73,8 @@ function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) ?? 
 async function assignCombo() {
   // サーバーの通し番号 n で割り当てる: 映像ありの2本 = COMBOS[n % 6]、条件の順番 = floor(n / 6) % 2
   // (0: 映像あり2本→映像なし2本、1: 映像なし2本→映像あり2本)。12人で一巡する
-  // 予備実験版とサーバーにつながらないときはランダム
-  if (ENDPOINT && !PILOT) {
+  // サーバーにつながらないときはランダム
+  if (ENDPOINT) {
     try {
       const r = await fetch(ENDPOINT + "?action=assign", { cache: "no-store" });
       const j = await r.json();
@@ -91,6 +85,8 @@ async function assignCombo() {
 }
 
 async function init() {
+  // 同じ端末からの2回目の回答を防ぐ(回答を送信すると記録される)
+  if (load("done", false)) { h(`<div class="card"><h1>回答済みです</h1><p>この端末からはすでに回答をいただいています。ご協力ありがとうございました。</p></div>`); return; }
   const cfg = await (await fetch("clips.json")).json();
   const clips = cfg.clips.filter(c => !c.practice);
   for (const c of clips) c.cues = await (await fetch(c.subs)).json();
@@ -108,8 +104,9 @@ function intro() {
         <li>短い会議の場面（各60秒）を <b>4本</b> 見てください。</li>
         <li>それぞれの場面のあとで、<b>4人（A〜D）の会議への貢献度</b>に応じて、合計100点を振り分けてください。</li>
       </ol>
-      <p class="muted">所要時間は約6分です。音声が出ますので、イヤホンの使用をおすすめします。英語の会議ですが、日本語字幕が付きます。場面によっては映像がなく、音声と字幕だけのものがあります。</p>
-      <p class="muted">回答は匿名で、研究目的にのみ使用します。途中でやめることもできます。</p>
+      <p class="muted">所要時間は約6分です。音声が出ますので、イヤホンを使い、静かな場所で回答してください。うなずきなどが見えるよう、できればパソコンやタブレットなど大きめの画面でお願いします。英語の会議ですが、日本語字幕が付きます。場面によっては映像がなく、音声と字幕だけのものがあります。</p>
+      <p class="muted">回答は匿名で、研究目的にのみ使用します。途中でやめることもできます。回答は1人1回でお願いします。</p>
+      <p class="muted">まだ回答していない人に、場面の内容や自分の回答を話さないでください。</p>
       <label class="consent"><input type="checkbox" id="ok"> <span>上記を理解し、研究への参加に同意します。</span></label>
       <button class="primary" id="start" disabled>はじめる</button>
     </div>
@@ -154,7 +151,6 @@ function trial(k) {
           <button data-d="1" aria-label="${p}を増やす">＋${STEP}</button>
         </div>`).join("")}
       <p style="text-align:right;margin:8px 0 12px">残り <span class="remain" id="remain">${TOTAL}</span> 点</p>
-      ${PILOT ? pilotQuestions(video) : ""}
       <button class="primary" id="next" disabled>${k + 1 < state.plan.length ? "次の場面へ" : "回答を送信する"}</button>
     </div>
   `);
@@ -195,9 +191,8 @@ function trial(k) {
     }
     const r = document.getElementById("remain");
     r.textContent = rest; r.className = "remain" + (rest === 0 ? " zero" : "");
-    next.disabled = rest !== 0 || (PILOT && !pilotAnswered(alloc, video));
+    next.disabled = rest !== 0;
   };
-  if (PILOT) alloc.addEventListener("change", render);
   alloc.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-d]"); if (!b) return;
     const p = b.closest(".row").dataset.p;
@@ -209,55 +204,56 @@ function trial(k) {
     v.pause();
     t.answeredAt = Date.now();
     t.ratingMs = t.answeredAt - (t.unlockedAt || t.answeredAt);
-    if (PILOT) {
-      t.pilotSeen = (alloc.querySelector('input[name="seen"]:checked') || {}).value || "";
-      t.pilotJudge = (alloc.querySelector('input[name="judge"]:checked') || {}).value || "";
-    }
     state.trials.push(t);
     k + 1 < state.plan.length ? trial(k + 1) : finish();
   };
   render();
 }
 
-// 予備実験版で各場面のあとに聞く質問
-function radios(name, q, opts) {
-  return `<fieldset class="pq"><legend>${q}</legend>${opts.map(o => `<label><input type="radio" name="${name}" value="${o}"> ${o}</label>`).join("")}</fieldset>`;
-}
-function pilotQuestions(video) {
-  return (video ? radios("seen", "4人のうなずきや表情などの動きは見えましたか？", ["はっきり見えた", "なんとか見えた", "ほとんど見えなかった"]) : "")
-    + radios("judge", "60秒で4人の貢献度を判断できましたか？", ["判断できた", "なんとなく判断できた", "判断できなかった"]);
-}
-function pilotAnswered(root, video) {
-  return (!video || root.querySelector('input[name="seen"]:checked')) && root.querySelector('input[name="judge"]:checked');
-}
-
 async function finish() {
-  h(`<div class="card"><p>送信しています…</p></div>`);
   const rows = state.trials.map(t => ({
-    mode: state.mode, src: state.src, pid: state.pid, startedAt: state.startedAt,
+    src: state.src, pid: state.pid, startedAt: state.startedAt,
     combo: state.combo, videoFirst: state.videoFirst, assignSource: state.assignSource,
     position: t.position, clip: t.clip, condition: t.condition,
     A: t.alloc.A, B: t.alloc.B, C: t.alloc.C, D: t.alloc.D,
     plays: t.plays, completed: t.completed, edits: t.edits || 0, ratingMs: t.ratingMs,
     screenW: window.screen.width, screenH: window.screen.height, ua: navigator.userAgent,
-    pilotSeen: t.pilotSeen || "", pilotJudge: t.pilotJudge || "",
   }));
   // 送信に失敗しても失わないよう、先に端末内にも保存する
   const saved = load("responses", []); saved.push(...rows); store("responses", saved);
+  store("done", true);
+  send(rows);
+}
+
+// スプレッドシートに送る。届いたことを確認できなければ「もう一度送信」を出す
+// (同じ回答が2回届いても、pid と position で1つにまとめられる)
+async function send(rows) {
+  h(`<div class="card"><p>送信しています…</p></div>`);
   let sent = false;
   if (ENDPOINT) {
     try {
       // text/plain で送ると Apps Script へのプリフライトが発生しない
-      await fetch(ENDPOINT, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(rows) });
-      sent = true;
+      const r = await fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(rows) });
+      sent = (await r.json()).ok === true;
     } catch (e) {}
+  }
+  if (sent || !ENDPOINT) {
+    h(`
+      <div class="card">
+        <h1>ご協力ありがとうございました</h1>
+        <p>回答は${sent ? "送信されました" : "この端末に保存されました"}。このページは閉じて大丈夫です。</p>
+      </div>
+    `);
+    return;
   }
   h(`
     <div class="card">
-      <h1>ご協力ありがとうございました</h1>
-      <p>回答は${sent ? "送信されました" : "この端末に保存されました"}。このページは閉じて大丈夫です。</p>
+      <h1>送信できませんでした</h1>
+      <p>通信状態を確認して、もう一度送信してください。回答はこの端末に残っています。</p>
+      <button class="primary" id="retry">もう一度送信する</button>
     </div>
   `);
+  document.getElementById("retry").onclick = () => send(rows);
 }
 
 // 端末内に保存された回答をCSVで書き出す(URLの末尾に #export を付けて開く)
