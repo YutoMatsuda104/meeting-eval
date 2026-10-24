@@ -62,7 +62,7 @@ const COMBOS = [[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]];
 const SRC = new URLSearchParams(location.search).get("src") || "general";
 
 const app = document.getElementById("app");
-const state = { pid: crypto.randomUUID(), startedAt: new Date().toISOString(), trials: [], src: SRC };
+const state = { pid: (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)), startedAt: new Date().toISOString(), trials: [], src: SRC };
 
 const h = (html) => { app.innerHTML = html; window.scrollTo(0, 0); };
 const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -73,11 +73,14 @@ function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) ?? 
 async function assignCombo() {
   // サーバーの通し番号 n で割り当てる: 映像ありの2本 = COMBOS[n % 6]、条件の順番 = floor(n / 6) % 2
   // (0: 映像あり2本→映像なし2本、1: 映像なし2本→映像あり2本)。12人で一巡する
-  // サーバーにつながらないときはランダム
+  // サーバーにつながらない・5秒以内に返事がないときはランダム(画面が止まったままにならないように)
   if (ENDPOINT) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
     try {
-      const r = await fetch(ENDPOINT + "?action=assign", { cache: "no-store" });
+      const r = await fetch(ENDPOINT + "?action=assign", { cache: "no-store", signal: ctrl.signal });
       const j = await r.json();
+      clearTimeout(timer);
       if (Number.isInteger(j.n)) return { index: j.n % COMBOS.length, videoFirst: Math.floor(j.n / COMBOS.length) % 2 === 0, source: "server" };
     } catch (e) {}
   }
@@ -113,10 +116,15 @@ function intro() {
     <p class="muted">映像：AMI Meeting Corpus（CC BY 4.0）</p>
   `);
   const ok = document.getElementById("ok"), start = document.getElementById("start");
-  ok.onchange = () => start.disabled = !ok.checked;
+  // アプリ内ブラウザなどで change が来ないことがあるので click でも反映する
+  const sync = () => start.disabled = !ok.checked;
+  ok.addEventListener("change", sync); ok.addEventListener("click", sync);
   start.onclick = async () => {
     start.disabled = true;
-    const a = await assignCombo();
+    start.textContent = "準備しています…";
+    let a;
+    try { a = await assignCombo(); }
+    catch (e) { a = { index: Math.floor(Math.random() * COMBOS.length), videoFirst: Math.random() < 0.5, source: "random" }; }
     // 条件ごとにまとめて提示する。各まとまりの中の2本の順番はランダム
     const vid = COMBOS[a.index], aud = [0, 1, 2, 3].filter(i => !vid.includes(i));
     const order = a.videoFirst ? shuffle(vid).concat(shuffle(aud)) : shuffle(aud).concat(shuffle(vid));
