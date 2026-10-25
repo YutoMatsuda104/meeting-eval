@@ -27,8 +27,10 @@
   .blind { position: absolute; inset: 0; background: #000; display: none; align-items: center; justify-content: center; color: #9a9a9a; font-size: .95rem; }
   .stage.audio-only .blind { display: flex; }
   .playbtn { position: absolute; inset: 0; margin: auto; width: 84px; height: 84px; border-radius: 50%; background: rgba(255,255,255,.92); color: #111; font-size: 2rem; }
-  .subs { min-height: 5.4em; background: #111; color: #fff; padding: 8px 12px; border-radius: 0 0 8px 8px; font-size: .95rem; line-height: 1.5; }
+  .subs { min-height: 7.6em; background: #111; color: #fff; padding: 8px 12px; border-radius: 0 0 8px 8px; font-size: .95rem; line-height: 1.5; }
   .subs p { margin: 0; }
+  .subs p.old { color: #9a9a9a; }
+  .subs p.old b { color: #b8a466; }
   .subs b { color: #ffd166; margin-right: .3em; }
   .replay { margin-top: 8px; background: none; color: var(--accent); padding: 6px 0; }
   .alloc-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
@@ -41,7 +43,6 @@
   .row button { padding: 10px 0; background: #eceef3; font-size: 1.1rem; font-weight: 600; }
   .row button:disabled { color: #c2c2c6; }
   .val { text-align: center; font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .locked { opacity: .45; pointer-events: none; }
   ol { padding-left: 1.3em; margin: 8px 0; }
   label.consent { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; }
   label.consent input { width: 22px; height: 22px; margin-top: 2px; }
@@ -148,9 +149,9 @@ function trial(k) {
     </div>
     <div class="subs" id="subs"></div>
     <button class="replay" id="replay" hidden>↻ もう一度再生する</button>
-    <div class="card locked" id="alloc" style="margin-top:12px">
+    <div class="card" id="alloc" style="margin-top:12px">
       <div class="alloc-head"><b>4人の貢献度に、合計100点を振り分けてください</b></div>
-      <p class="muted" id="hint" style="margin:0 0 6px">再生が終わると入力できます。</p>
+      <p class="muted" id="hint" style="margin:0 0 6px">再生しながら入力できます。最後まで再生すると次へ進めます。</p>
       ${"ABCD".split("").map(p => `
         <div class="row" data-p="${p}">
           <div class="who">${p}</div>
@@ -168,26 +169,44 @@ function trial(k) {
   const alloc = document.getElementById("alloc"), next = document.getElementById("next");
   let raf = 0, lastHtml = "";
 
+  // 字幕: 始まった字幕のうち直近3つを残して表示する(話し終わった字幕は薄く)。
+  // 誰が話したかを追いやすくするため。映像あり・なしの両条件で同じ表示にする
+  const SUB_LINES = 3;
   const drawSubs = () => {
     const now = v.currentTime;
-    const html = clip.cues.filter(c => c.start <= now && now < c.end)
-      .map(c => `<p><b>${c.speaker}</b>${c.ja}</p>`).join("");
+    const html = clip.cues.filter(c => c.start <= now).slice(-SUB_LINES)
+      .map(c => `<p class="${now < c.end ? "" : "old"}"><b>${c.speaker}</b>${c.ja}</p>`).join("");
     if (html !== lastHtml) { subs.innerHTML = html; lastHtml = html; }
     if (!v.paused) raf = requestAnimationFrame(drawSubs);
   };
+  // 最初から再生(1回目と「もう一度再生」)
   const start = () => {
     v.currentTime = 0;
     v.play().then(() => { t.plays++; play.hidden = true; replay.hidden = true; raf = requestAnimationFrame(drawSubs); })
       .catch(() => { play.hidden = false; });
   };
-  play.onclick = start;
-  replay.onclick = start;
-  // 途中で一時停止させない(タップで止まらないように何もしない)。終了後に入力を開放する
-  v.onended = () => {
-    cancelAnimationFrame(raf); subs.innerHTML = ""; lastHtml = "";
-    t.completed = true; replay.hidden = false;
-    if (alloc.classList.contains("locked")) { alloc.classList.remove("locked"); document.getElementById("hint").hidden = true; t.unlockedAt = Date.now(); alloc.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  // 途中で止まったとき(端末が自動で止めた・通信が途切れた等)は、止まった所から再開する
+  const resume = () => {
+    v.play().then(() => { play.hidden = true; raf = requestAnimationFrame(drawSubs); }).catch(() => { play.hidden = false; });
   };
+  play.onclick = () => (v.currentTime > 0 && !v.ended && !t.completed) ? resume() : start();
+  replay.onclick = start;
+  let leaving = false;
+  v.addEventListener("pause", () => {
+    if (leaving) return;
+    if (!v.ended && !(v.duration && v.currentTime >= v.duration - 0.3)) { t.stalls = (t.stalls || 0) + 1; play.hidden = false; }
+  });
+  // 最後まで再生したら次へ進めるようにする。ended が来ない端末があるので、終わり際の timeupdate でも判定する
+  const markDone = () => {
+    cancelAnimationFrame(raf); drawSubs();
+    play.hidden = true; replay.hidden = false;
+    if (t.completed) return;
+    t.completed = true; t.endedAt = Date.now();
+    document.getElementById("hint").textContent = "合計を100点にして、次へ進んでください。";
+    render();
+  };
+  v.addEventListener("ended", markDone);
+  v.addEventListener("timeupdate", () => { if (v.duration && v.currentTime >= v.duration - 0.3) markDone(); });
 
   const render = () => {
     const sum = Object.values(t.alloc).reduce((a, b) => a + b, 0), rest = TOTAL - sum;
@@ -199,19 +218,21 @@ function trial(k) {
     }
     const r = document.getElementById("remain");
     r.textContent = rest; r.className = "remain" + (rest === 0 ? " zero" : "");
-    next.disabled = rest !== 0;
+    next.disabled = rest !== 0 || !t.completed;
   };
   alloc.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-d]"); if (!b) return;
     const p = b.closest(".row").dataset.p;
     t.alloc[p] = Math.max(0, Math.min(TOTAL, t.alloc[p] + STEP * Number(b.dataset.d)));
     t.edits = (t.edits || 0) + 1;
+    if (!t.completed) t.editsDuringPlay = (t.editsDuringPlay || 0) + 1;
     render();
   });
   next.onclick = () => {
-    v.pause();
+    leaving = true; v.pause();
     t.answeredAt = Date.now();
-    t.ratingMs = t.answeredAt - (t.unlockedAt || t.answeredAt);
+    // 再生が終わってから「次へ」を押すまでの時間(再生中に入力を終えた人は短くなる)
+    t.ratingMs = t.answeredAt - (t.endedAt || t.answeredAt);
     state.trials.push(t);
     k + 1 < state.plan.length ? trial(k + 1) : finish();
   };
