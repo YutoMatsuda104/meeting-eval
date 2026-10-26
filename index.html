@@ -74,10 +74,10 @@ function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) ?? 
 async function assignCombo() {
   // サーバーの通し番号 n で割り当てる: 映像ありの2本 = COMBOS[n % 6]、条件の順番 = floor(n / 6) % 2
   // (0: 映像あり2本→映像なし2本、1: 映像なし2本→映像あり2本)。12人で一巡する
-  // サーバーにつながらない・5秒以内に返事がないときはランダム(画面が止まったままにならないように)
+  // サーバーにつながらない・8秒以内に返事がないときはランダム(画面が止まったままにならないように)
   if (ENDPOINT) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
       const r = await fetch(ENDPOINT + "?action=assign", { cache: "no-store", signal: ctrl.signal });
       const j = await r.json();
@@ -189,12 +189,16 @@ function trial(k) {
   const resume = () => {
     v.play().then(() => { play.hidden = true; raf = requestAnimationFrame(drawSubs); }).catch(() => { play.hidden = false; });
   };
-  play.onclick = () => (v.currentTime > 0 && !v.ended && !t.completed) ? resume() : start();
+  play.onclick = () => (v.currentTime > 0 && !nearEnd() && !t.completed) ? resume() : start();
   replay.onclick = start;
   let leaving = false;
+  // クリップの長さ(秒)。端末が動画の長さを誤って読む場合に備えて、v.duration ではなくこの値でも終了を判定する
+  const LEN = clip.duration || 60;
+  const nearEnd = () => v.ended || v.currentTime >= Math.min(LEN, v.duration || LEN) - 0.5;
   v.addEventListener("pause", () => {
     if (leaving) return;
-    if (!v.ended && !(v.duration && v.currentTime >= v.duration - 0.3)) { t.stalls = (t.stalls || 0) + 1; play.hidden = false; }
+    if (nearEnd()) return markDone();
+    t.stalls = (t.stalls || 0) + 1; play.hidden = false;
   });
   // 最後まで再生したら次へ進めるようにする。ended が来ない端末があるので、終わり際の timeupdate でも判定する
   const markDone = () => {
@@ -206,7 +210,8 @@ function trial(k) {
     render();
   };
   v.addEventListener("ended", markDone);
-  v.addEventListener("timeupdate", () => { if (v.duration && v.currentTime >= v.duration - 0.3) markDone(); });
+  v.addEventListener("timeupdate", () => { if (nearEnd()) markDone(); });
+  v.addEventListener("waiting", () => { if (nearEnd()) markDone(); });
 
   const render = () => {
     const sum = Object.values(t.alloc).reduce((a, b) => a + b, 0), rest = TOTAL - sum;
@@ -258,23 +263,24 @@ async function finish() {
 // (同じ回答が2回届いても、pid と position で1つにまとめられる)
 async function send(rows) {
   h(`<div class="card"><p>送信しています…</p></div>`);
-  let sent = false;
-  if (ENDPOINT) {
-    try {
-      // text/plain で送ると Apps Script へのプリフライトが発生しない
-      const r = await fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(rows) });
-      sent = (await r.json()).ok === true;
-    } catch (e) {}
+  if (!ENDPOINT) return thanks("この端末に保存されました");
+  const body = JSON.stringify(rows);
+  // 1. 届いたことを確認できる方法で送る(15秒まで待つ)
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "text/plain" }, body, signal: ctrl.signal });
+    clearTimeout(timer);
+    if ((await r.json()).ok === true) return thanks("送信されました");
+  } catch (e) {}
+  // 2. 確認できなかったときは、ブラウザに送信を任せる方法で送り直す(返事は受け取れないが、端末によってはこちらだけ届く)
+  //    1でも実は届いていた場合は同じ回答が2回届くが、分析で pid と position により1つにまとめる
+  let queued = false;
+  try { queued = navigator.sendBeacon(ENDPOINT, new Blob([body], { type: "text/plain" })); } catch (e) {}
+  if (!queued) {
+    try { await fetch(ENDPOINT, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body, keepalive: true }); queued = true; } catch (e) {}
   }
-  if (sent || !ENDPOINT) {
-    h(`
-      <div class="card">
-        <h1>ご協力ありがとうございました</h1>
-        <p>回答は${sent ? "送信されました" : "この端末に保存されました"}。このページは閉じて大丈夫です。</p>
-      </div>
-    `);
-    return;
-  }
+  if (queued) return thanks("送信されました");
   h(`
     <div class="card">
       <h1>送信できませんでした</h1>
@@ -283,6 +289,15 @@ async function send(rows) {
     </div>
   `);
   document.getElementById("retry").onclick = () => send(rows);
+}
+
+function thanks(msg) {
+  h(`
+    <div class="card">
+      <h1>ご協力ありがとうございました</h1>
+      <p>回答は${msg}。このページは閉じて大丈夫です。</p>
+    </div>
+  `);
 }
 
 // 端末内に保存された回答をCSVで書き出す(URLの末尾に #export を付けて開く)
