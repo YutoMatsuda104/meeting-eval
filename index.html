@@ -252,6 +252,7 @@ async function finish() {
     A: t.alloc.A, B: t.alloc.B, C: t.alloc.C, D: t.alloc.D,
     plays: t.plays, completed: t.completed, edits: t.edits || 0, ratingMs: t.ratingMs,
     screenW: window.screen.width, screenH: window.screen.height, ua: navigator.userAgent,
+    editsDuringPlay: t.editsDuringPlay || 0, stalls: t.stalls || 0,
   }));
   // 送信に失敗しても失わないよう、先に端末内にも保存する
   const saved = load("responses", []); saved.push(...rows); store("responses", saved);
